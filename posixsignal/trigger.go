@@ -22,7 +22,7 @@ type trigger struct {
 // NewTrigger initializes the trigger.
 // As arguments, you can provide os.Signal-s to listen to, if none are given,
 // it will default to SIGINT and SIGTERM.
-func NewTrigger(sig ...os.Signal) *trigger {
+func NewTrigger(sig ...os.Signal) shutdown.Trigger {
 	if len(sig) == 0 {
 		sig = make([]os.Signal, 2)
 		sig[0] = os.Interrupt

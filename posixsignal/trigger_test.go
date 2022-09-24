@@ -33,7 +33,7 @@ func TestNewTrigger(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewTrigger(tt.args.sig...); !reflect.DeepEqual(got, tt.want) {
+			if got := NewTrigger(tt.args.sig...).(*trigger); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewTrigger() = %v, want %v", got, tt.want)
 			}
 		})
@@ -65,7 +65,7 @@ func waitSig(t *testing.T, c <-chan struct{}) {
 func Test_trigger_WaitAsync(t *testing.T) {
 	ch := make(chan struct{}, 100)
 
-	targetTrigger := NewTrigger()
+	targetTrigger := NewTrigger().(*trigger)
 
 	_ = targetTrigger.WaitAsync(context.Background(), shutdownFunc(func(trigger shutdown.Trigger) {
 		ch <- struct{}{}
@@ -81,7 +81,7 @@ func Test_trigger_WaitAsync(t *testing.T) {
 	_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 	waitSig(t, ch)
 
-	targetTrigger = NewTrigger(syscall.SIGHUP)
+	targetTrigger = NewTrigger(syscall.SIGHUP).(*trigger)
 
 	_ = targetTrigger.WaitAsync(context.Background(), shutdownFunc(func(trigger shutdown.Trigger) {
 		ch <- struct{}{}
@@ -94,7 +94,7 @@ func Test_trigger_WaitAsync(t *testing.T) {
 func Test_trigger_WaitAsync_cancel(t *testing.T) {
 	ch := make(chan struct{}, 100)
 
-	targetTrigger := NewTrigger()
+	targetTrigger := NewTrigger().(*trigger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
