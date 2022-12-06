@@ -128,8 +128,6 @@ func (gs *GracefulShutdown) AddTrigger(trigger Trigger) {
 // WaitAsync calls Trigger.WaitAsync on all added Triggers. The Triggers start to wait for
 // shutdown requests. Returns an error if any Trigger.WaitAsync return an error.
 func (gs *GracefulShutdown) WaitAsync(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	for _, trigger := range gs.triggers {
 		if err := trigger.WaitAsync(ctx, gs); err != nil {
 			return err
