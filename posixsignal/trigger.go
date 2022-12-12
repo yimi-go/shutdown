@@ -6,9 +6,12 @@ package posixsignal
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"golang.org/x/exp/slog"
 
 	"github.com/yimi-go/shutdown"
 )
@@ -39,20 +42,22 @@ func (t *trigger) Name() string {
 	return name
 }
 
-// WaitAsync starts listening for posix signals.
-func (t *trigger) WaitAsync(ctx context.Context, controller shutdown.Controller) error {
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, t.signals...)
-
-		// Block until a signal is received, or the Context is Done.
-		select {
-		case <-c:
-		case <-ctx.Done():
-		}
-
-		controller.Shutdown(t)
-	}()
-
-	return nil
+// Wait starts listening for posix signals.
+func (t *trigger) Wait(ctx context.Context, controller shutdown.Controller) (err error) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, t.signals...)
+	// Block until a signal is received, or the Context is Done.
+	reason := ""
+	select {
+	case s := <-c:
+		reason = fmt.Sprintf("received signal: %s", s)
+	case <-ctx.Done():
+		err = ctx.Err()
+		reason = err.Error()
+	}
+	ctx = slog.NewContext(context.Background(), slog.FromContext(ctx))
+	controller.HandleShutdown(ctx, shutdown.EventFunc(func() string {
+		return reason
+	}))
+	return
 }

@@ -2,11 +2,15 @@ package posixsignal
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/yimi-go/shutdown"
 )
@@ -47,59 +51,64 @@ func Test_trigger_Name(t *testing.T) {
 	}
 }
 
-type shutdownFunc func(trigger shutdown.Trigger)
+func Test_trigger_Wait(t *testing.T) {
+	signals := []syscall.Signal{syscall.SIGINT, syscall.SIGTERM}
+	for _, s := range signals {
+		t.Run(s.String(), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-func (s shutdownFunc) WaitAsync(context.Context) error       { return nil }
-func (s shutdownFunc) Shutdown(trigger shutdown.Trigger)     { s(trigger) }
-func (s shutdownFunc) ReportError(error)                     {}
-func (s shutdownFunc) AddShutdownCallback(shutdown.Callback) {}
-
-func waitSig(t *testing.T, c <-chan struct{}) {
-	select {
-	case <-c:
-	case <-time.After(time.Second):
-		t.Error("timeout")
+			ctx := context.Background()
+			targetTrigger := NewTrigger().(*trigger)
+			gs1 := NewMockController(ctrl)
+			gs1.EXPECT().
+				HandleShutdown(gomock.Any(), gomock.Any()).
+				Do(func(c context.Context, event shutdown.Event) {
+					assert.Equal(t, fmt.Sprintf("received signal: %s", s), event.Reason())
+				}).
+				Times(1)
+			waiting, wait := make(chan struct{}), make(chan struct{})
+			go func() {
+				waiting <- struct{}{}
+				err := targetTrigger.Wait(ctx, gs1)
+				assert.Nil(t, err)
+				wait <- struct{}{}
+			}()
+			<-waiting
+			time.Sleep(time.Millisecond)
+			_ = syscall.Kill(syscall.Getpid(), s)
+			select {
+			case <-wait:
+			case <-time.After(time.Second):
+				t.Error("timeout")
+			}
+		})
 	}
 }
 
-func Test_trigger_WaitAsync(t *testing.T) {
-	ch := make(chan struct{}, 100)
+func Test_trigger_Wait_cancel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	targetTrigger := NewTrigger().(*trigger)
-
-	_ = targetTrigger.WaitAsync(context.Background(), shutdownFunc(func(trigger shutdown.Trigger) {
-		ch <- struct{}{}
-	}))
-	time.Sleep(time.Millisecond)
-	_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-	waitSig(t, ch)
-
-	_ = targetTrigger.WaitAsync(context.Background(), shutdownFunc(func(trigger shutdown.Trigger) {
-		ch <- struct{}{}
-	}))
-	time.Sleep(time.Millisecond)
-	_ = syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
-	waitSig(t, ch)
-
-	targetTrigger = NewTrigger(syscall.SIGHUP).(*trigger)
-
-	_ = targetTrigger.WaitAsync(context.Background(), shutdownFunc(func(trigger shutdown.Trigger) {
-		ch <- struct{}{}
-	}))
-	time.Sleep(time.Millisecond)
-	_ = syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
-	waitSig(t, ch)
-}
-
-func Test_trigger_WaitAsync_cancel(t *testing.T) {
-	ch := make(chan struct{}, 100)
-
-	targetTrigger := NewTrigger().(*trigger)
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	_ = targetTrigger.WaitAsync(ctx, shutdownFunc(func(trigger shutdown.Trigger) {
-		ch <- struct{}{}
-	}))
-	waitSig(t, ch)
+	targetTrigger := NewTrigger().(*trigger)
+	gs1 := NewMockController(ctrl)
+	gs1.EXPECT().HandleShutdown(gomock.Any(), gomock.Any()).
+		Do(func(c context.Context, event shutdown.Event) {
+			assert.Equal(t, context.Canceled.Error(), event.Reason())
+		}).
+		Times(1)
+	wait := make(chan struct{})
+	go func() {
+		err := targetTrigger.Wait(ctx, gs1)
+		assert.ErrorIs(t, err, context.Canceled)
+		wait <- struct{}{}
+	}()
+	select {
+	case <-wait:
+	case <-time.After(time.Hour):
+		t.Error("timeout")
+	}
 }
