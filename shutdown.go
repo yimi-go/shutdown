@@ -76,6 +76,7 @@ type Controller interface {
 // gracefulShutdown is main struct that handles Callbacks and
 // Triggers. Initialize it with New.
 type gracefulShutdown struct {
+	mux          sync.RWMutex
 	callbacks    []Callback
 	triggers     []Trigger
 	errorHandler ErrorHandler
@@ -88,7 +89,9 @@ type Option func(gs *gracefulShutdown)
 // WithCallback produces an Option that append Callbacks to a gracefulShutdown.
 func WithCallback(callback ...Callback) Option {
 	return func(gs *gracefulShutdown) {
+		gs.mux.Lock()
 		gs.callbacks = append(gs.callbacks, callback...)
+		gs.mux.Unlock()
 	}
 }
 
@@ -145,7 +148,9 @@ func (gs *gracefulShutdown) Wait(ctx context.Context) error {
 // AddShutdownCallback adds a Callback that will be called when
 // shutdown is requested.
 func (gs *gracefulShutdown) AddShutdownCallback(callback Callback) {
+	gs.mux.Lock()
 	gs.callbacks = append(gs.callbacks, callback)
+	gs.mux.Unlock()
 }
 
 func (gs *gracefulShutdown) HandleShutdown(ctx context.Context, event Event) {
@@ -155,6 +160,8 @@ func (gs *gracefulShutdown) HandleShutdown(ctx context.Context, event Event) {
 		ctx, cancel = context.WithTimeout(ctx, gs.timeout)
 		defer cancel()
 	}
+	gs.mux.RLock()
+	defer gs.mux.RUnlock()
 	for _, callback := range gs.callbacks {
 		wg.Add(1)
 		go func(callback Callback) {
